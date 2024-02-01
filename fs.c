@@ -27,6 +27,45 @@ static void itrunc(struct inode*);
 // only one device
 struct superblock sb; 
 
+//ffs: this function will find least used bg 
+// used when creating new dir
+int least_used_bg()
+{
+  int b, bi, m;
+  struct buf *bp;
+  int dev = 1;
+
+  int least_used_bg = 0;
+  int min_used_blocks = sb.bgsize;
+
+  int i = 0;
+  for (; i < sb.nbgs; i++)
+  {
+    int first_Block = BBGSTART(i, sb);
+    b =  first_Block + sb.bgmeta;
+    int num_allocated_blocks = 0;
+    for (; b < first_Block + sb.bgsize; b+= BPB)
+    {
+      bp = bread(dev, BBLOCK(b, sb));
+      for(bi = 0; bi < BPB && b + bi < sb.size; bi++)
+      {
+        m = 1 << (bi % 8);
+        if((bp->data[bi/8] & m) == 1) 
+        {  // Is block allocated?
+          num_allocated_blocks++;
+        }
+      }
+    brelse(bp);
+    }
+    if (num_allocated_blocks < min_used_blocks)
+    {
+      num_allocated_blocks = min_used_blocks;
+      least_used_bg = i;
+    }
+  }
+  return least_used_bg;
+}
+
 // Read the super block.
 void
 readsb(int dev, struct superblock *sb)
@@ -262,7 +301,21 @@ ialloc(uint dev, short type)
   struct buf *bp;
   struct dinode *dip;
 
-  for(inum = 1; inum < sb.ninodes; inum++){
+  int untill = sb.ninodes;
+  inum = 1;
+  if (type == T_DIR)
+  {
+    int bgnumber = least_used_bg();
+    inum = FINODEOFBG(bgnumber, sb);
+    untill = inum + sb.inodesperbg;
+    if (inum == 0)
+    {
+      inum = 1;
+    }
+    
+  }
+  
+  for(; inum < untill; inum++){
     bp = bread(dev, IBLOCK(inum, sb));
     dip = (struct dinode*)bp->data + inum%IPB;
     if(dip->type == 0){  // a free inode

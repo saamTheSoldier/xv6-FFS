@@ -78,6 +78,8 @@ struct dinode {
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14
 
+// ffs: return first inode number of given bg
+#define FINODEOFBG(b, sb) ((b) * (sb.inodesperbg))
 struct dirent {
   ushort inum;
   char name[DIRSIZ];
