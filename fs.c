@@ -146,13 +146,13 @@ balloc(uint dev)
 
 //ffs: block allocation in inode with number inum
 static uint
-balloci(uint dev, uint inum)
+balloci(uint dev, uint bgnum)
 {
   int b, bi, m;
   struct buf *bp;
   
-  int firstblock = IBGSTART(inum, sb);
-  cprintf("balloci: dev: %d inum: %d firstblock: %d\n", dev, inum, firstblock);
+  int firstblock = BBGSTART(bgnum, sb);
+  cprintf("balloci: dev: %d bgnum: %d firstblock: %d\n", dev, bgnum, firstblock);
 
   //ffs: b is block number 
   b = firstblock + sb.bgmeta;
@@ -515,10 +515,14 @@ bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
-
+  uint bgnum = IBGSTART(ip->inum, sb);
+  //ffs: to handle large file, we chunk them:
+  bgnum += (bn / NDIRECT);
+  bgnum = bgnum % sb.nbgs;
+  
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0){
-      uint blocknum = balloci(ip->dev, ip->inum);
+      uint blocknum = balloci(ip->dev, bgnum);
       if (blocknum != 0)
         ip->addrs[bn] = addr = blocknum;
       else
@@ -532,7 +536,7 @@ bmap(struct inode *ip, uint bn)
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
   if((addr = ip->addrs[NDIRECT]) == 0) {
-     uint blocknum = balloci(ip->dev, ip->inum);
+     uint blocknum = balloci(ip->dev, bgnum);
     if (blocknum != 0)
       ip->addrs[NDIRECT] = addr = blocknum;
     else
@@ -542,7 +546,7 @@ bmap(struct inode *ip, uint bn)
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       // a[bn] = addr = balloc(ip->dev);
-      uint blocknum = balloci(ip->dev, ip->inum);
+      uint blocknum = balloci(ip->dev, bgnum);
       if (blocknum != 0)
         a[bn] = addr = blocknum;
       else
