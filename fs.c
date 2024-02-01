@@ -41,7 +41,7 @@ int least_used_bg()
   int i = 0;
   for (; i < sb.nbgs; i++)
   {
-    int first_Block = BBGSTART(i, sb);
+    int first_Block = BBGSTART  (i, sb);
     b =  first_Block + sb.bgmeta;
     int num_allocated_blocks = 0;
     for (; b < first_Block + sb.bgsize; b+= BPB)
@@ -295,7 +295,7 @@ static struct inode* iget(uint dev, uint inum);
 // Mark it as allocated by  giving it type type.
 // Returns an unlocked but allocated and referenced inode.
 struct inode*
-ialloc(uint dev, short type)
+ialloc(uint dev, short type, uint pinum)
 {
   int inum;
   struct buf *bp;
@@ -313,6 +313,30 @@ ialloc(uint dev, short type)
       inum = 1;
     }
     
+  } else if (type == T_FILE)
+  {
+    int parent_bg = IBLOCKGROUP(pinum, sb);
+    int start = FINODEOFBG(parent_bg, sb);
+    int end = start + sb.inodesperbg;
+    if (start == 0)
+    {
+      start = 1;
+    }
+    int i;
+    for (i = start; i < end; i++)
+    {
+      bp = bread(dev, IBLOCK(i, sb));
+      dip = (struct dinode *)bp->data + i%IPB;
+      if (dip->type == 0)
+      {
+        memset(dip, 0, sizeof(*dip));
+        dip->type = type;
+        log_write(bp);
+        brelse(bp);
+        return iget(dev, i);
+      }
+      brelse(bp);
+    }
   }
   
   for(; inum < untill; inum++){
