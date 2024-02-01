@@ -37,7 +37,7 @@ int least_used_bg()
 
   int least_used_bg = 0;
   int min_used_blocks = sb.bgsize;
-
+  cprintf("num of bgs: %d\n", sb.nbgs);
   int i = 0;
   for (; i < sb.nbgs; i++)
   {
@@ -57,12 +57,14 @@ int least_used_bg()
       }
     brelse(bp);
     }
+    cprintf("i: %d, firstB: %d, numAlloc: %d, \n",i, first_Block, num_allocated_blocks);
     if (num_allocated_blocks < min_used_blocks)
     {
-      num_allocated_blocks = min_used_blocks;
+      min_used_blocks = num_allocated_blocks;
       least_used_bg = i;
     }
   }
+  cprintf("least: %d\n", least_used_bg);
   return least_used_bg;
 }
 
@@ -152,21 +154,21 @@ balloci(uint dev, uint bgnum)
   struct buf *bp;
   
   int firstblock = BBGSTART(bgnum, sb);
-  cprintf("balloci: dev: %d bgnum: %d firstblock: %d\n", dev, bgnum, firstblock);
+  // cprintf("balloci: dev: %d bgnum: %d firstblock: %d\n", dev, bgnum, firstblock);
 
   //ffs: b is block number 
   b = firstblock + sb.bgmeta;
   for(; b < firstblock + sb.bgsize; b += BPB) { //ffs: iterate data blocks in the bg containing that inode
     bp = bread(dev, BBLOCK(b, sb));
     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){ //ffs: searching for free blocks
-      cprintf("balloci: checking bmap for block %d...\n", b + bi);
+      // cprintf("balloci: checking bmap for block %d...\n", b + bi);
        m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
         bp->data[bi/8] |= m;  // Mark block in use.
         log_write(bp);
         brelse(bp);
         bzero(dev, b + bi);
-        cprintf("balloci: found free block: %d\n", b + bi);
+        // cprintf("balloci: found free block: %d\n", b + bi);
         return b + bi;
       }
     }
@@ -181,7 +183,7 @@ bfree(int dev, uint b)
   struct buf *bp;
   int bi, m;
 
-  cprintf("bfree: dev: %d b: %d\n", dev, b);
+  // cprintf("bfree: dev: %d b: %d\n", dev, b);
 
   bp = bread(dev, BBLOCK(b, sb));
   bi = BOFFSET(b, sb);
@@ -304,13 +306,32 @@ ialloc(uint dev, short type, uint pinum)
   int untill = sb.ninodes;
   inum = 1;
   if (type == T_DIR)
-  {
+  { 
+    //we want to put the dir in least used bg, if it's possible
     int bgnumber = least_used_bg();
-    inum = FINODEOFBG(bgnumber, sb);
-    untill = inum + sb.inodesperbg;
-    if (inum == 0)
+    for (; bgnumber < sb.nbgs; bgnumber++)
     {
-      inum = 1;
+      inum = FINODEOFBG(bgnumber, sb);
+      untill = inum + sb.inodesperbg;
+      if (inum == 0)
+      {
+        inum = 1;
+      }
+      for(; inum < untill; inum++)
+      {
+        bp = bread(dev, IBLOCK(inum, sb));
+        dip = (struct dinode*)bp->data + inum%IPB;
+        if(dip->type == 0)
+        {  // a free inode
+          memset(dip, 0, sizeof(*dip));
+          dip->type = type;
+          log_write(bp);   // mark it allocated on the disk
+          brelse(bp);
+          return iget(dev, inum);
+        }
+        brelse(bp);
+      }
+
     }
     
   } else if (type == T_FILE)
@@ -519,7 +540,7 @@ bmap(struct inode *ip, uint bn)
   //ffs: to handle large file, we chunk them:
   bgnum += (bn / NDIRECT);
   bgnum = bgnum % sb.nbgs;
-  
+
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0){
       uint blocknum = balloci(ip->dev, bgnum);
