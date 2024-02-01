@@ -37,12 +37,11 @@ int least_used_bg()
 
   int least_used_bg = 0;
   int min_used_blocks = sb.bgsize;
-  cprintf("num of bgs: %d\n", sb.nbgs);
   int i = 0;
   for (; i < sb.nbgs; i++)
   {
-    int first_Block = BBGSTART  (i, sb);
-    b =  first_Block + sb.bgmeta;
+    int first_Block = BBGSTART(i, sb);
+    b =  first_Block;
     int num_allocated_blocks = 0;
     for (; b < first_Block + sb.bgsize; b+= BPB)
     {
@@ -57,14 +56,12 @@ int least_used_bg()
       }
     brelse(bp);
     }
-    cprintf("i: %d, firstB: %d, numAlloc: %d, \n",i, first_Block, num_allocated_blocks);
     if (num_allocated_blocks < min_used_blocks)
     {
       min_used_blocks = num_allocated_blocks;
       least_used_bg = i;
     }
   }
-  cprintf("least: %d\n", least_used_bg);
   return least_used_bg;
 }
 
