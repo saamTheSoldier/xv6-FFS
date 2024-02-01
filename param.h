@@ -10,5 +10,5 @@
 #define MAXOPBLOCKS  10  // max # of blocks any FS op writes
 #define LOGSIZE      (MAXOPBLOCKS*3)  // max data blocks in on-disk log
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
-#define FSSIZE       1000  // size of file system in blocks
-
+#define FSSIZE       ((4096*64)+2+LOGSIZE) //ffs: chose a good fs_size to be easy to work with, according to number of bgs; it was 1000
+#define NBLOCKGROUPS          64  //ffs: number of block groups

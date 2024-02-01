@@ -52,31 +52,89 @@ bzero(int dev, int bno)
 
 // Blocks.
 
-// Allocate a zeroed disk block.
+// ffs: // Allocate a zeroed disk block.
+// static uint
+// balloc(uint dev)
+// {
+//   int b, bi, m;
+//   struct buf *bp;
+
+//   bp = 0;
+//   for(b = 0; b < sb.size; b += BPB){
+//     bp = bread(dev, BBLOCK(b, sb));
+//     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
+//       m = 1 << (bi % 8);
+//       if((bp->data[bi/8] & m) == 0){  // Is block free?
+//         bp->data[bi/8] |= m;  // Mark block in use.
+//         log_write(bp);
+//         brelse(bp);
+//         bzero(dev, b + bi);
+//         return b + bi;
+//       }
+//     }
+//     brelse(bp);
+//   }
+//   panic("balloc: out of blocks");
+// }
+// ffs: new block allocation policy
 static uint
 balloc(uint dev)
 {
   int b, bi, m;
   struct buf *bp;
+   int i = 0;
+  for (; i < sb.nbgs; i++) { //ffs: iterate all bgs to zero allocate them
+    int firstblock = BBGSTART(i, sb);
+    b = firstblock + sb.bgmeta;
+    for (; b < firstblock + sb.bgsize; b += BPB) { //ffs: iterate data blocks in a bg
+      bp = bread(dev, BBLOCK(b, sb));
+      // look for free blocks here
+      for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
+        m = 1 << (bi % 8);
+        if((bp->data[bi/8] & m) == 0){  // Is block free?
+          bp->data[bi/8] |= m;  // Mark block in use.
+          log_write(bp);
+          brelse(bp);
+          bzero(dev, b + bi);
+          return b + bi;
+        }
+      }
+      brelse(bp);
+    }
+  }
+  panic("balloc: out of blocks");
+}
 
-  bp = 0;
-  for(b = 0; b < sb.size; b += BPB){
+//ffs: block allocation in inode with number inum
+static uint
+balloci(uint dev, uint inum)
+{
+  int b, bi, m;
+  struct buf *bp;
+  
+  int firstblock = IBGSTART(inum, sb);
+  cprintf("balloci: dev: %d inum: %d firstblock: %d\n", dev, inum, firstblock);
+
+  //ffs: b is block number 
+  b = firstblock + sb.bgmeta;
+  for(; b < firstblock + sb.bgsize; b += BPB) { //ffs: iterate data blocks in the bg containing that inode
     bp = bread(dev, BBLOCK(b, sb));
-    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
-      m = 1 << (bi % 8);
+    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){ //ffs: searching for free blocks
+      cprintf("balloci: checking bmap for block %d...\n", b + bi);
+       m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
         bp->data[bi/8] |= m;  // Mark block in use.
         log_write(bp);
         brelse(bp);
         bzero(dev, b + bi);
+        cprintf("balloci: found free block: %d\n", b + bi);
         return b + bi;
       }
     }
     brelse(bp);
   }
-  panic("balloc: out of blocks");
+  return 0; // failed
 }
-
 // Free a disk block.
 static void
 bfree(int dev, uint b)
@@ -84,8 +142,10 @@ bfree(int dev, uint b)
   struct buf *bp;
   int bi, m;
 
+  cprintf("bfree: dev: %d b: %d\n", dev, b);
+
   bp = bread(dev, BBLOCK(b, sb));
-  bi = b % BPB;
+  bi = BOFFSET(b, sb);
   m = 1 << (bi % 8);
   if((bp->data[bi/8] & m) == 0)
     panic("freeing free block");
@@ -179,10 +239,14 @@ iinit(int dev)
   }
 
   readsb(dev, &sb);
-  cprintf("sb: size %d nblocks %d ninodes %d nlog %d logstart %d\
- inodestart %d bmap start %d\n", sb.size, sb.nblocks,
-          sb.ninodes, sb.nlog, sb.logstart, sb.inodestart,
-          sb.bmapstart);
+//   cprintf("sb: size %d nblocks %d ninodes %d nlog %d logstart %d
+//  inodestart %d bmap start %d\n", sb.size, sb.nblocks,
+//           sb.ninodes, sb.nlog, sb.logstart, sb.inodestart,
+//           sb.bmapstart);
+ cprintf("sb: size %d nblocks %d ninodes %d nlog %d logstart %d bgmeta %d nbgs %d bgstart %d\n", sb.size,
+          sb.nblocks, sb.ninodes, sb.nlog, sb.logstart, sb.bgmeta, sb.nbgs, sb.bgstart);
+  cprintf("bgsize %d inodesperbg %d inodeblocksperbg %d bmapblocksperbg %d datablocksperbg %d\n",
+          sb.bgsize, sb.inodesperbg, sb.inodeblocksperbg, sb.bmapblocksperbg, sb.datablocksperbg);
 }
 
 static struct inode* iget(uint dev, uint inum);
@@ -376,20 +440,36 @@ bmap(struct inode *ip, uint bn)
   struct buf *bp;
 
   if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
-      ip->addrs[bn] = addr = balloc(ip->dev);
+    if((addr = ip->addrs[bn]) == 0){
+      uint blocknum = balloci(ip->dev, ip->inum);
+      if (blocknum != 0)
+        ip->addrs[bn] = addr = blocknum;
+      else
+        ip->addrs[bn] = addr = balloc(ip->dev);
+    }
+      // ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+  if((addr = ip->addrs[NDIRECT]) == 0) {
+     uint blocknum = balloci(ip->dev, ip->inum);
+    if (blocknum != 0)
+      ip->addrs[NDIRECT] = addr = blocknum;
+    else
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+    }      // ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
+      // a[bn] = addr = balloc(ip->dev);
+      uint blocknum = balloci(ip->dev, ip->inum);
+      if (blocknum != 0)
+        a[bn] = addr = blocknum;
+      else
+        a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
