@@ -181,13 +181,12 @@ bfree(int dev, uint b)
   int bi, m;
 
   // cprintf("bfree: dev: %d b: %d\n", dev, b);
-
   bp = bread(dev, BBLOCK(b, sb));
-  bi = BOFFSET(b, sb);
+  bi = BOFFSET(b, sb); //bi = b % BPB;
   m = 1 << (bi % 8);
-  if((bp->data[bi/8] & m) == 0)
-    panic("freeing free block");
-  bp->data[bi/8] &= ~m;
+  if((bp->data[bi/8] & m) != 0)
+  // panic("freeing free block");
+    bp->data[bi/8] &= ~m;
   log_write(bp);
   brelse(bp);
 }
